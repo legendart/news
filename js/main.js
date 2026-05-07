@@ -1,54 +1,72 @@
 import { fetchNews } from './api.js';
-import { assessRisk, riskMeta } from './risk.js';
+import { scoreRisk, riskMeta } from './risk.js';
 
 // ── State ──────────────────────────────────────────────────────────────────
 const state = {
-  section: 'all',
-  query: '',
-  page: 1,
-  loading: false,
-  articles: [],
+  section:    'all',
+  query:      '',
+  page:       1,
+  sortBy:     'risk',   // 'risk' | 'date'
+  loading:    false,
+  articles:   [],       // raw Guardian results
+  scored:     [],       // { article, score } sorted
   totalPages: 1,
 };
 
 // ── DOM refs ───────────────────────────────────────────────────────────────
-const feedEl        = document.getElementById('feed');
-const searchInput   = document.getElementById('search-input');
-const searchBtn     = document.getElementById('search-btn');
-const tabBtns       = document.querySelectorAll('.tab-btn');
-const prevBtn       = document.getElementById('prev-page');
-const nextBtn       = document.getElementById('next-page');
-const pageInfo      = document.getElementById('page-info');
-const loadingEl     = document.getElementById('loading');
-const errorEl       = document.getElementById('error-msg');
-const totalCountEl  = document.getElementById('total-count');
-const lastUpdateEl  = document.getElementById('last-update');
+const feedEl       = document.getElementById('feed');
+const searchInput  = document.getElementById('search-input');
+const searchBtn    = document.getElementById('search-btn');
+const tabBtns      = document.querySelectorAll('.tab-btn');
+const sortSelect   = document.getElementById('sort-select');
+const prevBtn      = document.getElementById('prev-page');
+const nextBtn      = document.getElementById('next-page');
+const pageInfo     = document.getElementById('page-info');
+const loadingEl    = document.getElementById('loading');
+const errorEl      = document.getElementById('error-msg');
+const totalCountEl = document.getElementById('total-count');
+const lastUpdateEl = document.getElementById('last-update');
+
+// ── Scoring + sorting ──────────────────────────────────────────────────────
+function buildScored() {
+  state.scored = state.articles.map(article => {
+    const fields = article.fields ?? {};
+    const text   = `${fields.headline || article.webTitle || ''} ${fields.trailText || ''}`;
+    return { article, score: scoreRisk(text) };
+  });
+
+  if (state.sortBy === 'risk') {
+    state.scored.sort((a, b) => b.score - a.score);
+  }
+  // 'date' keeps Guardian's default newest-first order
+}
 
 // ── Render ─────────────────────────────────────────────────────────────────
-function renderCard(article) {
-  const fields    = article.fields ?? {};
-  const title     = fields.headline || article.webTitle || 'Untitled';
-  const summary   = fields.trailText || '';
-  const thumb     = fields.thumbnail || '';
-  const section   = article.sectionName || '';
-  const pubDate   = article.webPublicationDate
+function renderCard({ article, score }) {
+  const fields  = article.fields ?? {};
+  const title   = fields.headline || article.webTitle || 'Untitled';
+  const summary = fields.trailText || '';
+  const thumb   = fields.thumbnail || '';
+  const section = article.sectionName || '';
+  const pubDate = article.webPublicationDate
     ? new Date(article.webPublicationDate).toLocaleDateString('en-US', {
-        month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit',
+        month: 'short', day: 'numeric', year: 'numeric',
+        hour: '2-digit', minute: '2-digit',
       })
     : '';
 
-  const riskText  = `${title} ${summary} ${fields.bodyText || ''}`;
-  const level     = assessRisk(riskText);
-  const meta      = riskMeta(level);
+  const meta = riskMeta(score);
 
   const card = document.createElement('article');
   card.className = `card ${meta.cssClass}`;
   card.innerHTML = `
-    ${thumb ? `<div class="card-thumb"><img src="${thumb}" alt="" loading="lazy"></div>` : '<div class="card-thumb card-thumb--empty"></div>'}
+    ${thumb
+      ? `<div class="card-thumb"><img src="${thumb}" alt="" loading="lazy"></div>`
+      : '<div class="card-thumb card-thumb--empty"></div>'}
     <div class="card-body">
       <div class="card-meta">
         <span class="section-tag">${section}</span>
-        <span class="risk-badge ${meta.cssClass}">${meta.icon} ${meta.label}</span>
+        <span class="risk-badge ${meta.cssClass}">${meta.label}</span>
       </div>
       <h2 class="card-title">
         <a href="${article.webUrl}" target="_blank" rel="noopener">${title}</a>
@@ -62,12 +80,12 @@ function renderCard(article) {
 
 function renderFeed() {
   feedEl.innerHTML = '';
-  if (!state.articles.length) {
+  if (!state.scored.length) {
     feedEl.innerHTML = '<p class="empty-msg">No articles found.</p>';
     return;
   }
   const frag = document.createDocumentFragment();
-  state.articles.forEach(a => frag.appendChild(renderCard(a)));
+  state.scored.forEach(item => frag.appendChild(renderCard(item)));
   feedEl.appendChild(frag);
 }
 
@@ -88,17 +106,19 @@ async function load() {
   try {
     const res = await fetchNews({
       section: state.section,
-      query: state.query,
-      page: state.page,
+      query:   state.query,
+      page:    state.page,
     });
 
     state.articles   = res.results ?? [];
-    state.totalPages = Math.min(res.pages ?? 1, 50); // Guardian caps at 50
+    state.totalPages = Math.min(res.pages ?? 1, 50);
+
     totalCountEl.textContent = res.total
       ? `${res.total.toLocaleString()} articles found`
       : '';
     lastUpdateEl.textContent = `Updated ${new Date().toLocaleTimeString()}`;
 
+    buildScored();
     renderFeed();
     updatePagination();
   } catch (err) {
@@ -129,6 +149,12 @@ searchBtn.addEventListener('click', () => {
 
 searchInput.addEventListener('keydown', e => {
   if (e.key === 'Enter') searchBtn.click();
+});
+
+sortSelect.addEventListener('change', () => {
+  state.sortBy = sortSelect.value;
+  buildScored();
+  renderFeed();
 });
 
 prevBtn.addEventListener('click', () => {
