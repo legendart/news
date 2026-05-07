@@ -28,19 +28,27 @@ export async function fetchNews({ section = 'all', query = '', page = 1 } = {}) 
 // ── Korean RSS via rss2json ────────────────────────────────────────────────
 const RSS2JSON = 'https://api.rss2json.com/v1/api.json';
 
+// Verified 2026-05-07 via rss2json.com — all four pass with full %encoding.
+// KBS (world.kbs.co.kr) and Yonhap TV (yonhapnewstv.co.kr) rejected by rss2json.
 const KO_FEEDS = [
-  { url: 'https://world.kbs.co.kr/rss/rss_news.htm?lang=k',                                    name: 'KBS' },
-  { url: 'https://www.yonhapnewstv.co.kr/category/news/international/feed/',                    name: '연합뉴스' },
+  { url: 'https://www.yna.co.kr/rss/news.xml',                                                  name: '연합뉴스' },
   { url: 'https://www.chosun.com/arc/outboundfeeds/rss/category/international/?outputType=xml', name: '조선일보' },
+  { url: 'https://www.hankyung.com/feed/all-news',                                               name: '한국경제' },
+  { url: 'https://www.mk.co.kr/rss/30100041/',                                                   name: '매일경제' },
 ];
 
 function stripHtml(str) {
   return (str || '').replace(/<[^>]*>/g, '').trim();
 }
 
+function decodeEntities(str) {
+  return (str || '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+}
+
 function normalizeItem(item, sourceName) {
-  const thumb = item.thumbnail ||
+  const rawThumb = item.thumbnail ||
     (item.enclosure?.type?.startsWith('image') ? item.enclosure.link : '') || '';
+  const thumb = decodeEntities(rawThumb);
   return {
     webTitle:           stripHtml(item.title),
     webUrl:             item.link,
