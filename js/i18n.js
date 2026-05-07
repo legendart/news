@@ -39,6 +39,6 @@ export const STRINGS = {
     articlesFound: n     => `${n.toLocaleString()}개 기사`,
     updatedAt:     time  => `${time} 업데이트`,
     loadError:     msg   => `뉴스 로드 실패: ${msg}`,
-    footerSource:        'KBS · 연합뉴스 · 조선일보',
+    footerSource:        '연합뉴스 · 조선일보 · 한국경제 · 매일경제',
   },
 };
