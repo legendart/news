@@ -1,17 +1,22 @@
-import { fetchNews } from './api.js';
-import { scoreRisk, riskMeta } from './risk.js';
+import { fetchNews, fetchKoreanNews } from './api.js';
+import { scoreRisk, riskMeta }        from './risk.js';
+import { STRINGS }                    from './i18n.js';
 
 // ── State ──────────────────────────────────────────────────────────────────
 const state = {
+  lang:       localStorage.getItem('javis-lang') || 'en',
   section:    'all',
   query:      '',
   page:       1,
-  sortBy:     'risk',   // 'risk' | 'date'
+  sortBy:     'risk',
   loading:    false,
-  articles:   [],       // raw Guardian results
-  scored:     [],       // { article, score } sorted
+  articles:   [],
+  scored:     [],
   totalPages: 1,
 };
+
+// Korean articles are cached after first fetch; cleared on lang switch
+let koCache = null;
 
 // ── DOM refs ───────────────────────────────────────────────────────────────
 const feedEl       = document.getElementById('feed');
@@ -23,9 +28,54 @@ const prevBtn      = document.getElementById('prev-page');
 const nextBtn      = document.getElementById('next-page');
 const pageInfo     = document.getElementById('page-info');
 const loadingEl    = document.getElementById('loading');
+const loadingText  = document.getElementById('loading-text');
 const errorEl      = document.getElementById('error-msg');
 const totalCountEl = document.getElementById('total-count');
 const lastUpdateEl = document.getElementById('last-update');
+const feedTitleEl  = document.getElementById('feed-title');
+const brandSubEl   = document.querySelector('.brand-sub');
+const footerSrcEl  = document.getElementById('footer-source');
+const langOptBtns  = document.querySelectorAll('.lang-opt');
+
+// ── i18n helpers ───────────────────────────────────────────────────────────
+const s = () => STRINGS[state.lang];
+
+function applyLang(lang) {
+  const str = STRINGS[lang];
+
+  // Language toggle active state
+  langOptBtns.forEach(btn => btn.classList.toggle('active', btn.dataset.lang === lang));
+
+  // Header / static text
+  brandSubEl.textContent        = str.brandSub;
+  searchInput.placeholder       = str.searchPlaceholder;
+  searchBtn.textContent         = str.searchBtn;
+  feedTitleEl.textContent       = str.feedTitle;
+  loadingText.textContent       = str.loadingText;
+  prevBtn.textContent           = str.prevPage;
+  nextBtn.textContent           = str.nextPage;
+  if (footerSrcEl) footerSrcEl.textContent = str.footerSource;
+
+  // Sort select options
+  sortSelect.options[0].text = str.sortRisk;
+  sortSelect.options[1].text = str.sortDate;
+
+  // Category tabs
+  tabBtns.forEach(btn => {
+    const section = btn.dataset.section;
+    btn.textContent = str.tabs[section];
+  });
+
+  // In Korean mode, tab filtering is not supported — reset to 'all'
+  if (lang === 'ko') {
+    tabBtns.forEach(b => b.classList.remove('active'));
+    document.querySelector('[data-section="all"]').classList.add('active');
+    state.section = 'all';
+  }
+
+  // Re-render cards with updated risk labels
+  if (state.scored.length) renderFeed();
+}
 
 // ── Scoring + sorting ──────────────────────────────────────────────────────
 function buildScored() {
@@ -38,7 +88,6 @@ function buildScored() {
   if (state.sortBy === 'risk') {
     state.scored.sort((a, b) => b.score - a.score);
   }
-  // 'date' keeps Guardian's default newest-first order
 }
 
 // ── Render ─────────────────────────────────────────────────────────────────
@@ -49,13 +98,14 @@ function renderCard({ article, score }) {
   const thumb   = fields.thumbnail || '';
   const section = article.sectionName || '';
   const pubDate = article.webPublicationDate
-    ? new Date(article.webPublicationDate).toLocaleDateString('en-US', {
-        month: 'short', day: 'numeric', year: 'numeric',
-        hour: '2-digit', minute: '2-digit',
-      })
+    ? new Date(article.webPublicationDate).toLocaleDateString(
+        state.lang === 'ko' ? 'ko-KR' : 'en-US',
+        { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }
+      )
     : '';
 
-  const meta = riskMeta(score);
+  const meta      = riskMeta(score);
+  const riskLabel = s().riskLabel(score);
 
   const card = document.createElement('article');
   card.className = `card ${meta.cssClass}`;
@@ -66,7 +116,7 @@ function renderCard({ article, score }) {
     <div class="card-body">
       <div class="card-meta">
         <span class="section-tag">${section}</span>
-        <span class="risk-badge ${meta.cssClass}">${meta.label}</span>
+        <span class="risk-badge ${meta.cssClass}">${riskLabel}</span>
       </div>
       <h2 class="card-title">
         <a href="${article.webUrl}" target="_blank" rel="noopener">${title}</a>
@@ -81,7 +131,7 @@ function renderCard({ article, score }) {
 function renderFeed() {
   feedEl.innerHTML = '';
   if (!state.scored.length) {
-    feedEl.innerHTML = '<p class="empty-msg">No articles found.</p>';
+    feedEl.innerHTML = `<p class="empty-msg">${s().noArticles}</p>`;
     return;
   }
   const frag = document.createDocumentFragment();
@@ -90,7 +140,7 @@ function renderFeed() {
 }
 
 function updatePagination() {
-  pageInfo.textContent = `Page ${state.page} / ${state.totalPages}`;
+  pageInfo.textContent = `${state.page} / ${state.totalPages}`;
   prevBtn.disabled = state.page <= 1;
   nextBtn.disabled = state.page >= state.totalPages;
 }
@@ -104,25 +154,47 @@ async function load() {
   feedEl.innerHTML = '';
 
   try {
-    const res = await fetchNews({
-      section: state.section,
-      query:   state.query,
-      page:    state.page,
-    });
+    if (state.lang === 'ko') {
+      // Korean mode: fetch RSS once, cache, filter client-side
+      if (!koCache) {
+        const res = await fetchKoreanNews();
+        koCache = res.results;
+      }
 
-    state.articles   = res.results ?? [];
-    state.totalPages = Math.min(res.pages ?? 1, 50);
+      let articles = koCache;
+      if (state.query) {
+        const q = state.query.toLowerCase();
+        articles = koCache.filter(a => {
+          const t = (a.fields?.headline || a.webTitle || '').toLowerCase();
+          const d = (a.fields?.trailText || '').toLowerCase();
+          return t.includes(q) || d.includes(q);
+        });
+      }
 
-    totalCountEl.textContent = res.total
-      ? `${res.total.toLocaleString()} articles found`
-      : '';
-    lastUpdateEl.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+      state.articles   = articles;
+      state.totalPages = 1;
+      state.page       = 1;
+      totalCountEl.textContent = s().articlesFound(articles.length);
 
+    } else {
+      // English mode: Guardian API with section + search + pagination
+      const res = await fetchNews({
+        section: state.section,
+        query:   state.query,
+        page:    state.page,
+      });
+      state.articles   = res.results ?? [];
+      state.totalPages = Math.min(res.pages ?? 1, 50);
+      totalCountEl.textContent = res.total ? s().articlesFound(res.total) : '';
+    }
+
+    lastUpdateEl.textContent = s().updatedAt(new Date().toLocaleTimeString());
     buildScored();
     renderFeed();
     updatePagination();
+
   } catch (err) {
-    errorEl.textContent = `Failed to load news: ${err.message}`;
+    errorEl.textContent = s().loadError(err.message);
     errorEl.hidden = false;
   } finally {
     state.loading = false;
@@ -131,8 +203,31 @@ async function load() {
 }
 
 // ── Event wiring ───────────────────────────────────────────────────────────
+langOptBtns.forEach(btn => {
+  btn.addEventListener('click', () => {
+    const newLang = btn.dataset.lang;
+    if (newLang === state.lang) return;
+
+    state.lang  = newLang;
+    state.page  = 1;
+    state.query = '';
+    searchInput.value = '';
+    koCache = null;
+
+    localStorage.setItem('javis-lang', newLang);
+    applyLang(newLang);
+    load();
+  });
+});
+
 tabBtns.forEach(btn => {
   btn.addEventListener('click', () => {
+    // Korean mode: tabs only rename, section filtering not supported
+    if (state.lang === 'ko') {
+      tabBtns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      return;
+    }
     tabBtns.forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     state.section = btn.dataset.section;
@@ -166,4 +261,5 @@ nextBtn.addEventListener('click', () => {
 });
 
 // ── Boot ───────────────────────────────────────────────────────────────────
+applyLang(state.lang);
 load();

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>JAVIS INTEL — Global Risk Dashboard</title>
-  <meta name="description" content="Real-time geopolitical news and risk analysis dashboard powered by The Guardian.">
+  <meta name="description" content="Real-time geopolitical news and risk analysis dashboard.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap">
   <link rel="stylesheet" href="css/style.css">
@@ -32,6 +32,12 @@
         <button id="search-btn">Search</button>
       </div>
 
+      <!-- Language toggle -->
+      <div class="lang-toggle" role="group" aria-label="Language">
+        <button class="lang-opt" data-lang="ko">KO</button>
+        <button class="lang-opt active" data-lang="en">EN</button>
+      </div>
+
       <div class="header-status">
         <span class="live-dot">LIVE</span>
         <span id="last-update">—</span>
@@ -54,11 +60,11 @@
   <!-- ── Main content ────────────────────────────────────────────────── -->
   <main class="main">
     <div class="feed-header">
-      <h1>Intelligence Feed</h1>
+      <h1 id="feed-title">Intelligence Feed</h1>
       <span id="total-count"></span>
       <select id="sort-select" class="sort-select" aria-label="Sort order">
-        <option value="risk">리스크 높은 순</option>
-        <option value="date">최신순</option>
+        <option value="risk">Risk: High to Low</option>
+        <option value="date">Latest First</option>
       </select>
     </div>
 
@@ -66,21 +72,21 @@
 
     <div id="loading">
       <div class="spinner"></div>
-      <span>LOADING INTEL…</span>
+      <span id="loading-text">LOADING INTEL…</span>
     </div>
 
     <section id="feed" aria-label="News articles"></section>
 
     <div class="pagination">
       <button id="prev-page" disabled>← Prev</button>
-      <span id="page-info">Page 1</span>
+      <span id="page-info">1 / 1</span>
       <button id="next-page">Next →</button>
     </div>
   </main>
 
   <!-- ── Footer ──────────────────────────────────────────────────────── -->
   <footer class="footer">
-    JAVIS INTEL · Powered by <a href="https://open-platform.theguardian.com/" target="_blank" rel="noopener" style="color:#3b82f6">The Guardian Open Platform</a>
+    JAVIS INTEL · Powered by <span id="footer-source">The Guardian Open Platform</span>
   </footer>
 
   <script type="module" src="js/main.js"></script>
